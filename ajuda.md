@@ -4,7 +4,7 @@ App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, mant
 
 ---
 
-## 🗂 Upload
+## 📂 Upload
 - Tipos: **PDF, JPG, PNG**.
 - Envie múltiplos de uma vez.
 - **Limites de envio**:
