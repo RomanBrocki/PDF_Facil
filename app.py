@@ -5,18 +5,19 @@ from __future__ import annotations
 from typing import List, Dict
 import fitz  # PyMuPDF
 import io
-from PIL import Image
 
 import streamlit as st
 
 from app_helpers import (
     LEVELS, LABEL_TO_VAL, VAL_TO_LABEL,
+    TOTAL_UPLOAD_CAP_MB, PREVIEW_PDF_DPI, 
+    PREVIEW_BOX_W, PREVIEW_BOX_H,
     format_size, read_uploaded_as_bytes,
     notify, render_toasts,
     is_pdf, kind_of, format_pct,
     compute_sorted_order, move_up, move_down,
     reorder_page_state, thumb_into_box, thumb_key,
-    get_thumb
+    get_thumb,
 )
 
 from pdf_ops import (
@@ -30,12 +31,6 @@ st.set_page_config(page_title="Edição de PDFs e Imagens → PDF", page_icon="�
 st.title("📄 PDF Fácil - Ferramentas para PDF")
 st.caption("Edição de PDFs e Imagens com: União de arquivos, Conversão de imagens para PDF, Compressão, Rotação, Reordenação e Divisão.")
 
-# Limite global de upload (soma de todos os arquivos enviados de uma vez)
-TOTAL_UPLOAD_CAP_MB = 75
-
-# Previews: parâmetros “leves”
-PREVIEW_PDF_DPI = 60
-PREVIEW_BOX_W, PREVIEW_BOX_H = 220, 300
 
 # Cache de miniaturas: (name, size, page, rot) -> PNG bytes
 if "_thumb_cache" not in st.session_state:
@@ -64,7 +59,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                 st.session_state.upload_key += 1
                 for k in ("pages_flat","keep_map","rot_map","level_page",
                         "_unified_sig","prev_global_choice","last_global_ui",
-                        "_thumb_cache", "_upload_bytes"):
+                        "_thumb_cache", "_upload_bytes", "orig_order_map"):
                     st.session_state.pop(k, None)
                 st.rerun()
 
@@ -82,20 +77,36 @@ with st.expander("🧪 Interface Única", expanded=True):
     if up_uni:
         # Valor global "inicial" para o flatten (usa o último global salvo)
         g_val_init = LABEL_TO_VAL.get(st.session_state.get("last_global_ui", "Nenhuma"), "none")    
-
-        # 3) Flatten de páginas (todas as páginas de todos os uploads)
+        
+        # 2) Assinatura e cache dos uploads (bytes por arquivo + limite de lote)
         #    Criamos estruturas de estado por PÁGINA:
         #    - pages_flat: [(file_idx, page_idx)]
         #    - keep_map[i]: bool
         #    - rot_map[i]: int (0/90/180/270)
         #    - level_page[i]: 'none'|'min'|'med'|'max'
         # Assinatura dos uploads (nome + tamanho) para detectar mudanças
+        # --- Cache de bytes por upload (lido 1x por lote) ---
+        # Observação: aqui não dependemos de files_sig ainda.
+        # Se a lista de nomes mudou em relação ao último _unified_sig, recriamos o cache.
+        _curr_names = [getattr(uf, "name", "") for uf in up_uni]
+        _prev_sig = st.session_state.get("_unified_sig", None)
+        _prev_names = [n for (n, _) in _prev_sig] if _prev_sig else None
+
+        if ("_upload_bytes" not in st.session_state) or (_prev_names != _curr_names):
+            st.session_state._upload_bytes = {}
+            for fi, uf in enumerate(up_uni):
+                try:
+                    st.session_state._upload_bytes[fi] = read_uploaded_as_bytes(uf)
+                except Exception:
+                    st.session_state._upload_bytes[fi] = b""
+
         files_sig = []
-        for uf in up_uni:
+        for fi, uf in enumerate(up_uni):
             try:
                 size_approx = getattr(uf, "size", None)
                 if size_approx is None:
-                    size_approx = len(read_uploaded_as_bytes(uf))
+                    # agora usamos os bytes já cacheados na sessão (_upload_bytes)
+                    size_approx = len(st.session_state._upload_bytes[fi])
             except Exception:
                 size_approx = None
             files_sig.append((getattr(uf, "name", ""), size_approx))
@@ -109,22 +120,15 @@ with st.expander("🧪 Interface Única", expanded=True):
                     "Envie em partes menores ou compacte antes."
                 )
                 st.stop()  # interrompe o restante da UI para este envio
-        # --- Cache de bytes por upload (lido 1x por lote) ---
-        if ("_upload_bytes" not in st.session_state) or (st.session_state.get("_unified_sig") != files_sig):
-            st.session_state._upload_bytes = {}
-            for fi, uf in enumerate(up_uni):
-                try:
-                    st.session_state._upload_bytes[fi] = read_uploaded_as_bytes(uf)
-                except Exception:
-                    st.session_state._upload_bytes[fi] = b""
-
+        # 3) Flatten de páginas (todas as páginas de todos os uploads)
         if ("pages_flat" not in st.session_state) or (st.session_state.get("_unified_sig") != files_sig):
             st.session_state._unified_sig = files_sig
             st.session_state.pages_flat = []
             st.session_state.keep_map = []
             st.session_state.rot_map = []
             st.session_state.level_page = []
-
+            st.session_state.orig_order_map = {}
+            _arrival = 0
             # monta flatten
             for fi, uf in enumerate(up_uni):
                 data = st.session_state._upload_bytes.get(fi, b"")
@@ -136,6 +140,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                             st.session_state.keep_map.append(True)
                             st.session_state.rot_map.append(0)
                             st.session_state.level_page.append(g_val_init)
+                            st.session_state.orig_order_map[(fi, pi)] = _arrival; _arrival += 1
                         doc.close()
                     except Exception:
                         pass
@@ -144,7 +149,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                     st.session_state.keep_map.append(True)
                     st.session_state.rot_map.append(0)
                     st.session_state.level_page.append(g_val_init)
-
+                    st.session_state.orig_order_map[(fi, 0)] = _arrival; _arrival += 1
 
         # 4) Controles do grid (preview de todas as páginas)
         st.caption("Selecione, gire, mova e ajuste compressão por página. Se alterado, o Preset Global sobrepõe os individuais.")
@@ -220,7 +225,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                         fi, pi = st.session_state.pages_flat[idx]
                         uf = up_uni[fi]
                         if sort_primary_pages == "Original":
-                            return idx  # posição atual
+                            return st.session_state.orig_order_map.get((fi, pi), idx)
                         if sort_primary_pages == "Nome":
                             return (getattr(uf, "name", "") or "").lower()
                         if sort_primary_pages == "Tipo":
@@ -240,7 +245,7 @@ with st.expander("🧪 Interface Única", expanded=True):
         cols = st.columns(5)
         for i, (fi, pi) in enumerate(st.session_state.pages_flat):
             uf = up_uni[fi]
-            data = st.session_state._upload_bytes.get(fi, b"")
+            
 
             with cols[i % 5]:
                 # --- layout do card: imagem (esq) + controles (dir) ---
@@ -298,22 +303,21 @@ with st.expander("🧪 Interface Única", expanded=True):
 
                 # mover implementa swap + rerun (fora do 'right' pra rodar sempre que clicar)
                 if st.session_state.get(f"up_u_{i}"):
-                    pf = st.session_state.pages_flat
+                    n = len(st.session_state.pages_flat)
                     if i > 0:
-                        pf[i-1], pf[i] = pf[i], pf[i-1]
-                        for arr in ("keep_map","rot_map","level_page"):
-                            a = st.session_state[arr]
-                            a[i-1], a[i] = a[i], a[i-1]
+                        current = list(range(n))
+                        current[i - 1], current[i] = current[i], current[i - 1]
+                        reorder_page_state(current)
                         st.rerun()
 
                 if st.session_state.get(f"down_u_{i}"):
-                    pf = st.session_state.pages_flat
-                    if i < len(pf)-1:
-                        pf[i+1], pf[i] = pf[i], pf[i+1]
-                        for arr in ("keep_map","rot_map","level_page"):
-                            a = st.session_state[arr]
-                            a[i+1], a[i] = a[i], a[i+1]
+                    n = len(st.session_state.pages_flat)
+                    if i < n - 1:
+                        current = list(range(n))
+                        current[i + 1], current[i] = current[i], current[i + 1]
+                        reorder_page_state(current)
                         st.rerun()
+
 
 
         # badge de personalizado — compara com o global atual salvo na sessão

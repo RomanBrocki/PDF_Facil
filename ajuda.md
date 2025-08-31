@@ -14,7 +14,7 @@ App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, mant
 ---
 
 ## 🔀 Ordenar / Selecionar
-- **Manual** (ex.: `3,1,2`) ou **Automático** (Nome/Tipo).
+- **Manual** (ex.: `3,1,2`) ou **Automático** (Original/Nome/Tipo).
 - Marque **Manter** para incluir no resultado.
 - Setas **↑/↓** movem páginas individualmente.
 

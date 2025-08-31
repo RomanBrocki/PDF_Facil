@@ -1,6 +1,12 @@
-
 """
-app_helpers.py — helpers do app (presets, formatação e utilidades leves).
+app_helpers.py
+
+Utilitários para a interface Streamlit:
+- Presets de compressão e rótulos
+- Formatação de tamanhos e percentuais
+- Toasts (notificações efêmeras) com state
+- Ordenação e reordenação de páginas no state
+- Geração de thumbnails cacheadas (PDF/JPG/PNG)
 """
 
 from __future__ import annotations
@@ -41,7 +47,15 @@ VAL_TO_LABEL = {v: k for k, v in LABEL_TO_VAL.items()}
 
 # --------- FORMATAÇÃO ---------
 def format_size(num_bytes: int | None) -> str:
-    """Formata bytes em B/kB/MB com 2 casas (ponto -> vírgula)."""
+    """Formata número de bytes em string legível (B/kB/MB).
+
+    Args:
+        num_bytes (int | None): Quantidade em bytes ou None.
+
+    Returns:
+        str: Valor formatado. Usa vírgula como separador decimal.
+    """
+
     if num_bytes is None:
         return "—"
     kb = 1024.0
@@ -55,7 +69,17 @@ def format_size(num_bytes: int | None) -> str:
 
 # --------- LEITURA SEGURA DE UPLOAD ---------
 def read_uploaded_as_bytes(uf) -> bytes:
-    """Lê UploadedFile/BytesIO e reseta o ponteiro, retornando bytes."""
+    """Lê um arquivo de upload (UploadedFile/BytesIO) e retorna bytes.
+
+    Reseta o ponteiro após a leitura para não interferir em usos futuros.
+
+    Args:
+        uf: Objeto de upload do Streamlit ou similar.
+
+    Returns:
+        bytes: Conteúdo binário do arquivo. Retorna b"" em caso de erro.
+    """
+
     try:
         data = uf.read()
         uf.seek(0)
@@ -64,19 +88,34 @@ def read_uploaded_as_bytes(uf) -> bytes:
         return b""
 
 def notify(key: str, msg: str, icon: str | None = None):
+    """Registra/atualiza um toast identificado por chave no session_state.
+
+    Args:
+        key (str): Identificador do toast (ex.: "global", "item:3").
+        msg (str): Mensagem a exibir.
+        icon (str | None): Emoji/ícone opcional (ex.: "⚠️", "📦").
+
+    Returns:
+        None
     """
-    Registra / substitui um balão identificado por 'key'.
-    Ex.: 'global' ou f'item:{idx}'.
-    """
+
     if "_toasts" not in st.session_state:
         st.session_state._toasts = {}  # key -> {"msg": str, "icon": str, "ts": float}
     st.session_state._toasts[key] = {"msg": msg, "icon": icon or "", "ts": time.time()}
 
 def render_toasts(duration: float = 5.0):
+    """Renderiza todos os toasts ativos e descarta os expirados.
+
+    A função reapresenta os toasts a cada rerun do Streamlit, respeitando
+    o tempo máximo de exibição.
+
+    Args:
+        duration (float): Duração máxima (s) para manter cada toast visível.
+
+    Returns:
+        None
     """
-    Re-renderiza todos os balões ativos (<= duration segundos).
-    Não persiste elementos de UI entre reruns — reimprime a cada chamada.
-    """
+
     now = time.time()
     toasts = st.session_state.get("_toasts", {})
     # filtra ativos e descarta expirados
@@ -94,23 +133,47 @@ def render_toasts(duration: float = 5.0):
 
 # --------- Tipo de arquivo ---------
 def is_pdf(uf) -> bool:
-    """Retorna True se for PDF pelo mimetype ou extensão."""
+    """Detecta se um upload aparenta ser PDF pelo mimetype ou extensão.
+
+    Args:
+        uf: Objeto de upload do Streamlit (ou compatível) com .name/.type.
+
+    Returns:
+        bool: True se for PDF; False caso contrário.
+    """
+
     name = getattr(uf, "name", "") or ""
     typ = (getattr(uf, "type", "") or "").lower()
     return typ.endswith("pdf") or name.lower().endswith(".pdf")
 
 def kind_of(uf) -> str:
-    """'pdf' ou 'image'."""
+    """Classifica o upload como 'pdf' ou 'image'.
+
+    Args:
+        uf: Objeto de upload do Streamlit (ou compatível).
+
+    Returns:
+        str: 'pdf' ou 'image'.
+    """
+
     return "pdf" if is_pdf(uf) else "image"
 
 
 # --------- Percentual (clamp e string pronta) ---------
 def format_pct(before: int, after: int) -> str:
+    """Converte (antes→depois) em string percentual de economia.
+
+    Regra: se não houver melhora (after >= before), retorna "0%".
+    Caso contrário, retorna "-NN%".
+
+    Args:
+        before (int): Tamanho original.
+        after (int): Tamanho após compressão/estimativa.
+
+    Returns:
+        str: Percentual formatado (ex.: "-37%").
     """
-    Converte (before→after) em string de percentual:
-      - se piorar ou ficar igual: '0%'
-      - se reduzir: '-NN%'
-    """
+
     if not before or before <= 0:
         return "0%"
     raw = round(100 * (1 - (after / max(before, 1))))
@@ -119,11 +182,17 @@ def format_pct(before: int, after: int) -> str:
 
 # --------- Ordenação e movimento de itens (UI state) ---------
 def compute_sorted_order(uploaded, primary: str, reverse: bool) -> list[int]:
+    """Calcula a ordem de índices conforme critério.
+
+    Args:
+        uploaded: Lista de arquivos enviados (objetos UploadedFile).
+        primary (str): Um de {"Original", "Nome", "Tipo"}.
+        reverse (bool): Inverte a direção da ordenação quando True.
+
+    Returns:
+        list[int]: Lista de índices reordenados.
     """
-    Retorna a ordem de índices conforme o critério:
-      - primary ∈ {"Original", "Nome", "Tipo"}
-      - reverse True inverte a direção
-    """
+
     n = len(uploaded)
     if n == 0:
         return []
@@ -149,24 +218,68 @@ def compute_sorted_order(uploaded, primary: str, reverse: bool) -> list[int]:
     return idxs
 
 def move_up(pos: int) -> None:
-    """Move o item da posição 'pos' uma casa para cima em st.session_state.order."""
+    """Move o item da posição 'pos' uma casa para cima na ordem global.
+
+    Args:
+        pos (int): Posição atual (0-based).
+
+    Returns:
+        None
+    """
+
     order = st.session_state.get("order", [])
     if 0 < pos < len(order):
         order[pos - 1], order[pos] = order[pos], order[pos - 1]
         st.session_state.order = order  # garante persistência
 
 def move_down(pos: int) -> None:
-    """Move o item da posição 'pos' uma casa para baixo em st.session_state.order."""
+    """Move o item da posição 'pos' uma casa para baixo na ordem global.
+
+    Args:
+        pos (int): Posição atual (0-based).
+
+    Returns:
+        None
+    """
+
     order = st.session_state.get("order", [])
     if 0 <= pos < len(order) - 1:
         order[pos + 1], order[pos] = order[pos], order[pos + 1]
         st.session_state.order = order  # garante persistência
 
 def thumb_key(fi: int, pi: int, rot: int) -> tuple:
+    """Gera a chave estável do cache de thumbnail para (arquivo, página, rotação).
+
+    A chave incorpora nome e tamanho do arquivo de origem, índice de página
+    e rotação aplicada, garantindo invalidação correta.
+
+    Args:
+        fi (int): Índice do arquivo no upload atual.
+        pi (int): Índice da página (0-based) dentro do arquivo.
+        rot (int): Rotação em graus (0/90/180/270).
+
+    Returns:
+        tuple: Tupla hashable usada como chave de cache.
+    """
+
     name, size = st.session_state._unified_sig[fi]
     return (name or "", int(size or 0), int(pi), int(rot))
 
 def get_thumb(uf, fi: int, pi: int, rot: int) -> bytes:
+    """Obtém (ou gera) a miniatura PNG de uma página/arquivo e cacheia.
+
+    Respeita a rotação solicitada e usa resolução reduzida para PDFs.
+
+    Args:
+        uf: Objeto UploadedFile referente ao arquivo de origem.
+        fi (int): Índice do arquivo no upload atual.
+        pi (int): Índice da página (0-based).
+        rot (int): Rotação aplicada (0/90/180/270).
+
+    Returns:
+        bytes: PNG em bytes da miniatura.
+    """
+
     key = thumb_key(fi, pi, rot)
     cache = st.session_state._thumb_cache
     if key in cache:
@@ -206,12 +319,21 @@ def get_thumb(uf, fi: int, pi: int, rot: int) -> bytes:
 
 
 def thumb_into_box(img: Image.Image, box_w: int = 240, box_h: int = 320, bg=None) -> bytes:
+    """Ajusta a imagem para caber em um canvas fixo e retorna PNG.
+
+    Se 'bg' não for definido, gera PNG RGBA com fundo transparente, permitindo
+    que o tema do Streamlit apareça atrás (ótimo para dark mode).
+    Se 'bg' for (R,G,B), usa canvas RGB sólido.
+
+    Args:
+        img (PIL.Image.Image): Imagem a encaixar.
+        box_w (int): Largura do canvas (px).
+        box_h (int): Altura do canvas (px).
+        bg (tuple | None): Fundo sólido RGB ou None para transparência.
+
+    Returns:
+        bytes: PNG exportado (preserva alfa quando RGBA).
     """
-    Redimensiona proporcionalmente para caber em (box_w x box_h),
-    centraliza num canvas fixo e retorna PNG com transparência.
-    Se 'bg' for fornecido (tupla RGB), usa fundo sólido; caso contrário, fundo transparente.
-    """
-    
 
     # 1) Redimensiona proporcionalmente para caber no retângulo interno (com pequena margem)
     inner_w, inner_h = box_w - 8, box_h - 8
@@ -244,6 +366,22 @@ def thumb_into_box(img: Image.Image, box_w: int = 240, box_h: int = 320, bg=None
 
 # --- Helper: aplica uma nova ordem (permutação) às listas de estado por PÁGINA ---
 def reorder_page_state(new_order_idx: list[int]) -> None:
+    """Aplica uma nova permutação ao estado por PÁGINA no session_state.
+
+    Reordena de forma consistente:
+    - pages_flat
+    - keep_map
+    - rot_map
+    - level_page
+
+    Args:
+        new_order_idx (list[int]): Permutação 0-based com o mesmo comprimento
+            das listas de estado.
+
+    Returns:
+        None
+    """
+
     pf = st.session_state.pages_flat
     km = st.session_state.keep_map
     rm = st.session_state.rot_map

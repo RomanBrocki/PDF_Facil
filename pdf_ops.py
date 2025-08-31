@@ -1,8 +1,16 @@
+"""
+pdf_ops.py
 
+Motor de processamento puro (sem Streamlit):
+- Estimativas de tamanho (PDF/por página/imagem)
+- Compressão real (smart/all) com guard-rails
+- Conversão imagem→PDF (1 página)
+- União/merge por itens ou por páginas já flatten
+- Split/rotação por página
+
+Todas as funções trabalham com bytes e metadados simples.
 """
-pdf_ops.py — motor "puro": compressão, união, dividir/girar e estimativas.
-Sem Streamlit aqui. Todas as funções recebem/retornam bytes e metadados simples.
-"""
+
 
 from __future__ import annotations
 
@@ -13,14 +21,13 @@ import img2pdf
 import fitz  # PyMuPDF
 from PIL import Image
 # Pillow 9 vs 10+: constante de reamostragem
-# Pillow 9 vs 10+: constante de reamostragem
 try:
     RESAMPLE_LANCZOS = Image.Resampling.LANCZOS  # pyright: ignore[reportAttributeAccessIssue]
 except AttributeError:
     # Pillow < 10 mantém o alias antigo
     RESAMPLE_LANCZOS = Image.LANCZOS  # pyright: ignore[reportAttributeAccessIssue]
 
-  # retrocompatibilidade
+# retrocompatibilidade
 
 from pypdf import PdfReader, PdfWriter
 
@@ -32,12 +39,18 @@ from app_helpers import LEVELS
 # ===========================
 def _is_image_only(page: "fitz.Page") -> bool:
 
-    p = cast(Any, page)
 
+    """Detecta se uma página é 'imagem-only' (sem texto e sem vetores).
+
+    Heurística usada pelo preset 'min' para decidir rasterização seletiva.
+
+    Args:
+        page (fitz.Page): Página do PyMuPDF.
+
+    Returns:
+        bool: True se não houver texto nem vetores; False caso contrário.
     """
-    Heurística: página sem texto e sem vetores => tratada como 'imagem-only'.
-    (É a mesma ideia usada no preset 'min'.)
-    """
+    p = cast(Any, page)
     try:
         has_text = bool(p.get_text("text"))             # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
@@ -50,13 +63,16 @@ def _is_image_only(page: "fitz.Page") -> bool:
 
 
 def estimate_pdf_size(pdf_bytes: bytes, level: str) -> int:
+    """Estima o tamanho final de um PDF após aplicar um nível de compressão.
+
+    Args:
+        pdf_bytes (bytes): PDF de entrada.
+        level (str): 'none'|'min'|'med'|'max'.
+
+    Returns:
+        int: Tamanho estimado em bytes do PDF resultante.
     """
-    Estima tamanho final de 'pdf_bytes' aplicando o nível informado.
-      - 'none': retorna len(pdf_bytes)
-      - 'min' : preserva vetores/texto; rasteriza APENAS páginas 'imagem-only' @200 dpi / JPEG 85
-      - 'med' : rasteriza TODAS @150 dpi / q70
-      - 'max' : rasteriza TODAS @110 dpi / q50
-    """
+
     params = LEVELS.get(level or "none", LEVELS["none"])
     mode = params["mode"]
     dpi = params["dpi"]
@@ -111,13 +127,17 @@ def estimate_pdf_size(pdf_bytes: bytes, level: str) -> int:
     return len(pdf_bytes)
 
 def estimate_pdf_page_size(pdf_bytes: bytes, page_idx: int, level: str) -> int:
+    """Estima o tamanho de UMA página após aplicar um nível.
+
+    Args:
+        pdf_bytes (bytes): PDF de origem.
+        page_idx (int): Índice 0-based da página.
+        level (str): 'none'|'min'|'med'|'max'.
+
+    Returns:
+        int: Tamanho estimado em bytes para a página empacotada em PDF.
     """
-    Estima o tamanho de UMA página após aplicar o 'level'.
-      - 'none': retorna a página copiada (1:1) empacotada em PDF
-      - 'min' : se imagem-only → rasteriza @200dpi / q85; senão copia 1:1
-      - 'med' : rasteriza sempre @150dpi / q70
-      - 'max' : rasteriza sempre @110dpi / q50
-    """
+
     params = LEVELS.get(level or "none", LEVELS["none"])
     mode = params["mode"]; dpi = params["dpi"]; jpg_q = params["jpg_q"]
 
@@ -167,11 +187,16 @@ def estimate_pdf_page_size(pdf_bytes: bytes, page_idx: int, level: str) -> int:
 
 
 def estimate_image_pdf_size(img_bytes: bytes, level: str) -> int:
+    """Estima o tamanho do PDF (1 página) gerado a partir de uma imagem.
+
+    Args:
+        img_bytes (bytes): PNG/JPG de entrada.
+        level (str): 'none'|'min'|'med'|'max'.
+
+    Returns:
+        int: Tamanho estimado em bytes do PDF de 1 página.
     """
-    Estima tamanho do PDF 1 página gerado a partir de uma imagem (PNG/JPG).
-      - 'none': wrap direto
-      - 'min'/'med'/'max': downscale + recompressão JPEG, depois PDF (img2pdf)
-    """
+
     params = LEVELS.get(level or "none", LEVELS["none"])
     mode = params["mode"]
     if mode == "none":
@@ -213,10 +238,18 @@ def estimate_image_pdf_size(img_bytes: bytes, level: str) -> int:
 #   COMPRESSÃO REAL
 # ===========================
 def compress_pdf(pdf_bytes: bytes, level: str | None) -> bytes:
+    """Aplica compressão real a um PDF conforme o nível.
+
+    Respeita guard-rails: se o resultado não for menor, devolve o original.
+
+    Args:
+        pdf_bytes (bytes): PDF de entrada.
+        level (str | None): 'none'|'min'|'med'|'max' ou None.
+
+    Returns:
+        bytes: PDF possivelmente comprimido (ou original).
     """
-    Compressão unificada — mesmos parâmetros no uso individual e em presets.
-    Guard-rail: se não reduzir, devolve o original.
-    """
+
     if not level or level in (None, "none"):
         return pdf_bytes
 
@@ -274,10 +307,16 @@ def compress_pdf(pdf_bytes: bytes, level: str | None) -> bytes:
 
 
 def image_to_pdf_bytes(file_bytes: bytes, level: str | None) -> bytes:
+    """Converte PNG/JPG para PDF de 1 página (com compressão opcional).
+
+    Args:
+        file_bytes (bytes): Imagem de entrada.
+        level (str | None): 'none'|'min'|'med'|'max' ou None.
+
+    Returns:
+        bytes: PDF resultante (1 página).
     """
-    Converte PNG/JPG → PDF (1 página).
-    Se 'level' for fornecido (min/med/max), aplica downscale + recompressão JPEG.
-    """
+
     if level in (None, "none"):
         try:
             return cast(bytes, img2pdf.convert(file_bytes))
@@ -318,15 +357,17 @@ def image_to_pdf_bytes(file_bytes: bytes, level: str | None) -> bytes:
 #   UNIÃO / MERGE
 # ===========================
 def merge_items(items: List[Tuple[str, bytes, str, str]]) -> bytes:
+    """Une itens (PDF/imagem) em um único PDF.
+
+    Para 'pdf', aplica compressão por item; para 'image', converte imagem→PDF.
+
+    Args:
+        items (List[Tuple[str, bytes, str, str]]): Tuplas (name, data, kind, level).
+
+    Returns:
+        bytes: PDF final unificado.
     """
-    Une uma lista de itens em um único PDF.
-    items: lista de tuplas (name, data_bytes, kind, level)
-      - kind: 'pdf' ou 'image'
-      - level: 'none'|'min'|'med'|'max' (nível individual aplicado no item)
-    Estratégia:
-      - Se 'pdf': aplica compressão conforme 'level' (uma passada só) e anexa páginas.
-      - Se 'image': converte imagem -> PDF 1 página (respeitando 'level') e anexa.
-    """
+
     writer = PdfWriter()
     errors: List[str] = []
 
@@ -361,23 +402,18 @@ def merge_pages(
     pages_flat: List[Tuple[str, bytes, str, int, str]],
     rotation_seq: List[int] | None = None
 ) -> bytes:
-    """
-    Monta um PDF final respeitando a ORDEM GLOBAL DE PÁGINAS.
-    pages_flat: lista de tuplas (name, data_bytes, kind, page_idx, level)
-        - kind: 'pdf' ou 'image'
-        - page_idx: para 'pdf' indica qual página (0-based); para 'image' ignore
-        - level: 'none'|'min'|'med'|'max' (nível aplicado *nesta página*)
-    rotation_seq: lista com o MESMO comprimento de pages_flat contendo ângulos 0/90/180/270.
-                  Se None, assume 0 para todas.
+    """Monta um PDF final a partir de páginas já flatten (ordem global).
 
-    Estratégia:
-      - Para 'image': converte imagem → PDF 1 página respeitando o nível (image_to_pdf_bytes).
-      - Para 'pdf':
-          * Se level == 'none': copia a página 1:1 (insert_pdf) sem rasterizar.
-          * Se level em {'min','med','max'}: rasteriza apenas ESTA página com parâmetros do preset
-            (mantendo o mesmo retângulo), equivalente à compressão por página.
-      - Aplica rotação solicitada na página já inserida.
+    Permite aplicar rotação por página e compressão por página.
+
+    Args:
+        pages_flat (List[Tuple[str, bytes, str, int, str]]): (name, data, kind, page_idx, level).
+        rotation_seq (List[int] | None): Ângulos por posição (0/90/180/270).
+
+    Returns:
+        bytes: PDF final na ordem solicitada.
     """
+
     dst = fitz.open()
     rotations = rotation_seq or [0] * len(pages_flat)
 
@@ -471,10 +507,17 @@ def merge_pages(
 #   DIVIDIR / GIRAR
 # ===========================
 def split_pdf(pdf_bytes: bytes, keep_pages_0based: List[int], rotation_map: Dict[int, int] | None = None) -> bytes:
+    """Gera um novo PDF contendo apenas páginas selecionadas e rotações.
+
+    Args:
+        pdf_bytes (bytes): PDF de origem.
+        keep_pages_0based (List[int]): Índices 0-based das páginas a manter.
+        rotation_map (Dict[int, int] | None): Ângulos por índice (0/90/180/270).
+
+    Returns:
+        bytes: PDF contendo apenas as páginas escolhidas (com rotações).
     """
-    Cria um novo PDF contendo apenas as páginas indicadas (0-based) e aplica rotações (0/90/180/270) se fornecidas.
-    Implementado com PyMuPDF para manter a fidelidade e performance.
-    """
+
     src = fitz.open("pdf", pdf_bytes)
     dst = fitz.open()
 

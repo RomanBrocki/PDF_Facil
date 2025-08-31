@@ -16,7 +16,7 @@ Criado por **Roman Brocki** em Python, com suporte do **ChatGPT-5** no desenvolv
   - **Mínima** (rasteriza só páginas “imagem-only”)
   - **Média**
   - **Máxima** (downscale forte, mantendo legibilidade)
-- **Reordenar páginas** (manual ou por critérios).
+- **Reordenar páginas** (manual ou por critérios: Original, Nome ou Tipo).
 - **Girar páginas** (90/180/270°).
 - **Dividir** (selecionar páginas específicas para um novo PDF).
 - **Estimativa de tamanho** (antes → depois) para prever ganho de compressão.
@@ -74,3 +74,4 @@ Se o total exceder 75 MB, o app **interrompe o fluxo do lote** e orienta a divid
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
+```
