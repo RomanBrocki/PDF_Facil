@@ -172,8 +172,14 @@ def get_thumb(uf, fi: int, pi: int, rot: int) -> bytes:
     if key in cache:
         return cache[key]
 
-    # Só lê bytes se precisar gerar
-    data = read_uploaded_as_bytes(uf)
+    # Prefere cache do app (se existir) para evitar I/O repetido
+    data = None
+    try:
+        data = st.session_state._upload_bytes.get(fi, None)
+    except Exception:
+        data = None
+    if data is None:
+        data = read_uploaded_as_bytes(uf)
 
     # Gera imagem base
     if is_pdf(uf):

@@ -63,7 +63,8 @@ with st.expander("🧪 Interface Única", expanded=True):
             if st.button("Limpar tudo", use_container_width=True, key="btn_clear_all"):
                 st.session_state.upload_key += 1
                 for k in ("pages_flat","keep_map","rot_map","level_page",
-                        "_unified_sig","prev_global_choice","last_global_ui", "_thumb_cache"):
+                        "_unified_sig","prev_global_choice","last_global_ui",
+                        "_thumb_cache", "_upload_bytes"):
                     st.session_state.pop(k, None)
                 st.rerun()
 
@@ -108,6 +109,14 @@ with st.expander("🧪 Interface Única", expanded=True):
                     "Envie em partes menores ou compacte antes."
                 )
                 st.stop()  # interrompe o restante da UI para este envio
+        # --- Cache de bytes por upload (lido 1x por lote) ---
+        if ("_upload_bytes" not in st.session_state) or (st.session_state.get("_unified_sig") != files_sig):
+            st.session_state._upload_bytes = {}
+            for fi, uf in enumerate(up_uni):
+                try:
+                    st.session_state._upload_bytes[fi] = read_uploaded_as_bytes(uf)
+                except Exception:
+                    st.session_state._upload_bytes[fi] = b""
 
         if ("pages_flat" not in st.session_state) or (st.session_state.get("_unified_sig") != files_sig):
             st.session_state._unified_sig = files_sig
@@ -118,7 +127,7 @@ with st.expander("🧪 Interface Única", expanded=True):
 
             # monta flatten
             for fi, uf in enumerate(up_uni):
-                data = read_uploaded_as_bytes(uf)
+                data = st.session_state._upload_bytes.get(fi, b"")
                 if is_pdf(uf):
                     try:
                         doc = fitz.open("pdf", data)
@@ -231,7 +240,7 @@ with st.expander("🧪 Interface Única", expanded=True):
         cols = st.columns(5)
         for i, (fi, pi) in enumerate(st.session_state.pages_flat):
             uf = up_uni[fi]
-            data = read_uploaded_as_bytes(uf)
+            data = st.session_state._upload_bytes.get(fi, b"")
 
             with cols[i % 5]:
                 # --- layout do card: imagem (esq) + controles (dir) ---
@@ -367,7 +376,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                     if not keep:
                         continue
                     uf = up_uni[fi]
-                    data = read_uploaded_as_bytes(uf)
+                    data = st.session_state._upload_bytes.get(fi, b"")
                     if is_pdf(uf):
                         total_before += estimate_pdf_page_size(data, pi, "none")
                         total_after  += estimate_pdf_page_size(data, pi, lvl)
@@ -397,7 +406,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                     if not st.session_state.keep_map[i]:
                         continue
                     uf = up_uni[fi]
-                    data = read_uploaded_as_bytes(uf)
+                    data = st.session_state._upload_bytes.get(fi, b"")
                     kind = "pdf" if is_pdf(uf) else "image"
                     lvl  = st.session_state.level_page[i]
 
