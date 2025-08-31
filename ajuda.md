@@ -1,77 +1,73 @@
-```markdown
 # 📄 PDF Fácil — Guia de Uso
 
-Este app foi feito para ser simples e direto: você sobe arquivos e define o que quer fazer.  
-Aqui vai o passo a passo das principais funções:
+App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, manter) e gera um **único PDF** com compressão opcional.
 
 ---
 
-## 🗂 Upload de Arquivos
-- Suporta **PDF, JPG e PNG**.  
-- Pode enviar múltiplos arquivos de uma vez.  
-- Cada página (ou imagem) vira um “card” no grid, onde você controla individualmente.
+## 🗂 Upload
+- Tipos: **PDF, JPG, PNG**.
+- Envie múltiplos de uma vez.
+- **Limites de envio**:
+  - **50 MB por arquivo** (config do servidor).
+  - **75 MB por lote** (soma de arquivos); se passar, o app avisa e interrompe o fluxo do lote.
 
 ---
 
-## 🔀 Reordenar
-- **Manual**: digite a ordem (ex.: `3,1,2`).  
-- **Automático**: ordenar por *Nome* ou *Tipo*.  
-- Também dá pra mover páginas com os botões ↑ e ↓.
+## 🔀 Ordenar / Selecionar
+- **Manual** (ex.: `3,1,2`) ou **Automático** (Nome/Tipo).
+- Marque **Manter** para incluir no resultado.
+- Setas **↑/↓** movem páginas individualmente.
 
 ---
 
 ## 🔄 Rotação
-- Cada página pode ser girada em 90/180/270°.  
-- O preview já mostra a rotação antes de gerar o PDF final.
+- 90/180/270° por página.
+- O preview já reflete a rotação.
 
 ---
 
 ## 📉 Compressão
-- **Global (todas as páginas)** ou **individual (cada página)**.  
-- Perfis disponíveis:
-  - Nenhuma: mantém como está.
-  - Mínima: só rasteriza páginas puramente imagem.
-  - Média: rasteriza todas as páginas com qualidade intermediária.
-  - Máxima: redução mais agressiva, mantendo leitura confortável.
+- **Global** (tudo) ou **individual** (por página).
+- Perfis:
+  - **Nenhuma**: mantém como está.
+  - **Mínima**: rasteriza apenas páginas imagem-only (ganho com baixo custo de CPU).
+  - **Média** / **Máxima**: reduções mais fortes; use quando precisar de arquivos pequenos.
 
 ---
 
-## 📊 Estimativa de Tamanho
-- Antes de gerar o PDF final, você pode pedir uma **estimativa de tamanho total**.  
-- O app calcula o “antes e depois” e já mostra o percentual de economia esperado.  
+## 📊 Estimativa (opcional)
+- Mostra “antes → depois” estimado e o percentual de economia.
+- **Guard-rails / Fallbacks**:
+  - Se não houver ganho real, o app mantém o **original** daquela página/arquivo.
+  - Resultado final **nunca fica maior** que a entrada.
 
 ---
 
-## 🛡 Guard-rails / Fallbacks
-- Se uma compressão não trouxer ganho real, o app **mantém o arquivo ou página original**.  
-- Ou seja, **nunca vai sair um PDF maior** do que o fornecido.  
-- Na união de arquivos, cada item passa pela compressão pedida, mas é garantido que não vai ficar maior.  
-- Esse cuidado evita perder tempo e garante que o resultado sempre é igual ou menor.
+## 🖼️ Previews e desempenho
+- Previews são **cacheados** para poupar recursos:
+  - Ao **girar** uma página, **apenas ela** é recalculada.
+  - Ao **mudar ordem**, apenas as posições trocadas re-renderizam (o resto vem do cache).
+  - Ao **alterar outras configs** (ex.: compressão), **previews não são recalculados**.
+  - Ao **adicionar arquivos**, só os **novos** têm preview gerado.
+- Previews usam **resolução reduzida** para não estourar memória em PDFs grandes.
 
 ---
 
-## ✂️ Dividir
-- Use as caixas “Manter” para escolher quais páginas entram no PDF final.  
-- Dá pra criar rapidamente versões menores de um arquivo grande.
+## ✂️ Dividir / 📥 Download
+- Use “Manter” para criar sub-conjuntos e gerar PDFs menores.
+- Clique em **Gerar PDF** e baixe o arquivo final.
 
 ---
 
-## 🧩 Unir
-- Se você mandar múltiplos arquivos (PDFs e imagens), tudo é convertido e unido em um único PDF.  
-- A ordem segue o grid — ou seja, você tem controle total.
+## 🔒 Dados
+- Os arquivos **não são armazenados**: ficam só na sessão ativa. Ao encerrar, são descartados.
+- Não há envio a terceiros.
 
 ---
 
-## 📥 Download
-- Quando estiver satisfeito, clique em **Gerar PDF**.  
-- O app monta o arquivo final, mostra aviso de sucesso e libera o botão de download.
+## 📬 Suporte & Código
+- Dúvidas/bugs: abra uma **Issue** no GitHub do projeto.
 
----
-
-## 💡 Dicas
-- Limite atual: ~200MB por arquivo no upload.  
-- Imagens PNG com fundo transparente são preservadas como tal nas miniaturas.  
-- Use compressão mínima/média para relatórios; máxima quando quiser só reduzir peso para envio.
 - Código aberto disponível em: [GitHub - Roman Brocki](https://github.com/romanbrocki/converte_une_pdf)  
 
 ---

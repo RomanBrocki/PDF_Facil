@@ -8,13 +8,21 @@ from typing import Dict
 import time
 import streamlit as st
 from PIL import Image, ImageOps
-import io as _io
+import io
+import fitz  # PyMuPDF
 
 try:
     RESAMPLE_LANCZOS = Image.Resampling.LANCZOS  # pyright: ignore[reportAttributeAccessIssue]
 except AttributeError:
     # Pillow < 10 mantém o alias antigo
     RESAMPLE_LANCZOS = Image.LANCZOS  # pyright: ignore[reportAttributeAccessIssue]
+
+# Limite global de upload (soma de todos os arquivos enviados de uma vez)
+TOTAL_UPLOAD_CAP_MB = 75
+
+# Previews: parâmetros “leves”
+PREVIEW_PDF_DPI = 60
+PREVIEW_BOX_W, PREVIEW_BOX_H = 220, 300
 
 # --------- PRESETS ---------
 # Mapa de níveis internos -> parâmetros da engine
@@ -154,6 +162,42 @@ def move_down(pos: int) -> None:
         order[pos + 1], order[pos] = order[pos], order[pos + 1]
         st.session_state.order = order  # garante persistência
 
+def thumb_key(fi: int, pi: int, rot: int) -> tuple:
+    name, size = st.session_state._unified_sig[fi]
+    return (name or "", int(size or 0), int(pi), int(rot))
+
+def get_thumb(uf, fi: int, pi: int, rot: int) -> bytes:
+    key = thumb_key(fi, pi, rot)
+    cache = st.session_state._thumb_cache
+    if key in cache:
+        return cache[key]
+
+    # Só lê bytes se precisar gerar
+    data = read_uploaded_as_bytes(uf)
+
+    # Gera imagem base
+    if is_pdf(uf):
+        try:
+            doc = fitz.open("pdf", data)
+            pg = doc.load_page(pi)
+            pix = pg.get_pixmap(dpi=PREVIEW_PDF_DPI, alpha=False)  # type: ignore[attr-defined]
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            doc.close()
+        except Exception:
+            img = Image.new("RGB", (180, 240), (230, 230, 230))
+    else:
+        try:
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception:
+            img = Image.new("RGB", (180, 240), (230, 230, 230))
+
+    if rot in (90, 180, 270):
+        img = img.rotate(-rot, expand=True)
+
+    png = thumb_into_box(img, box_w=PREVIEW_BOX_W, box_h=PREVIEW_BOX_H)
+    cache[key] = png
+    return png
+
 
 def thumb_into_box(img: Image.Image, box_w: int = 240, box_h: int = 320, bg=None) -> bytes:
     """
@@ -161,7 +205,7 @@ def thumb_into_box(img: Image.Image, box_w: int = 240, box_h: int = 320, bg=None
     centraliza num canvas fixo e retorna PNG com transparência.
     Se 'bg' for fornecido (tupla RGB), usa fundo sólido; caso contrário, fundo transparente.
     """
-    import io as _io
+    
 
     # 1) Redimensiona proporcionalmente para caber no retângulo interno (com pequena margem)
     inner_w, inner_h = box_w - 8, box_h - 8
@@ -185,7 +229,7 @@ def thumb_into_box(img: Image.Image, box_w: int = 240, box_h: int = 320, bg=None
     canvas.paste(fitted_rgba, (x, y), fitted_rgba)
 
     # 5) Exporta como PNG (mantém transparência quando RGBA)
-    buf = _io.BytesIO()
+    buf = io.BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 

@@ -15,7 +15,8 @@ from app_helpers import (
     notify, render_toasts,
     is_pdf, kind_of, format_pct,
     compute_sorted_order, move_up, move_down,
-    reorder_page_state, thumb_into_box,
+    reorder_page_state, thumb_into_box, thumb_key,
+    get_thumb
 )
 
 from pdf_ops import (
@@ -29,6 +30,16 @@ st.set_page_config(page_title="Edição de PDFs e Imagens → PDF", page_icon="�
 st.title("📄 PDF Fácil - Ferramentas para PDF")
 st.caption("Edição de PDFs e Imagens com: União de arquivos, Conversão de imagens para PDF, Compressão, Rotação, Reordenação e Divisão.")
 
+# Limite global de upload (soma de todos os arquivos enviados de uma vez)
+TOTAL_UPLOAD_CAP_MB = 75
+
+# Previews: parâmetros “leves”
+PREVIEW_PDF_DPI = 60
+PREVIEW_BOX_W, PREVIEW_BOX_H = 220, 300
+
+# Cache de miniaturas: (name, size, page, rot) -> PNG bytes
+if "_thumb_cache" not in st.session_state:
+    st.session_state._thumb_cache = {}
 
 # Estado inicial
 if "upload_key" not in st.session_state:
@@ -47,12 +58,12 @@ with st.expander("🧪 Interface Única", expanded=True):
         hdr_l, hdr_r = st.columns([0.8, 0.2])
         with hdr_l:
             st.markdown("**Arquivos (PDF/JPG/PNG)**")
-            st.caption("Limite 200MB/arquivo · Arraste e solte ou clique em “Browse files”.")
+            st.caption("Limites: 50MB por arquivo (somando máximo 75MB). Arraste e solte ou clique em “Browse files”.")
         with hdr_r:
             if st.button("Limpar tudo", use_container_width=True, key="btn_clear_all"):
                 st.session_state.upload_key += 1
                 for k in ("pages_flat","keep_map","rot_map","level_page",
-                        "_unified_sig","prev_global_choice","last_global_ui"):
+                        "_unified_sig","prev_global_choice","last_global_ui", "_thumb_cache"):
                     st.session_state.pop(k, None)
                 st.rerun()
 
@@ -63,7 +74,7 @@ with st.expander("🧪 Interface Única", expanded=True):
             accept_multiple_files=True,
             key=f"uploader_unified_{st.session_state.upload_key}",
             label_visibility="collapsed",
-            help="Selecione vários arquivos; a ordem por página pode ser ajustada adiante."
+            help="Selecione vários arquivos (somando até 75MB). A ordem por página pode ser ajustada adiante."
         )
 
 
@@ -87,6 +98,16 @@ with st.expander("🧪 Interface Única", expanded=True):
             except Exception:
                 size_approx = None
             files_sig.append((getattr(uf, "name", ""), size_approx))
+            # --- Limite global (soma dos arquivos) ---
+            _total_bytes = sum([(s or 0) for _, s in files_sig])
+            _total_mb = _total_bytes / (1024 * 1024)
+            if _total_mb > TOTAL_UPLOAD_CAP_MB:
+                st.error(
+                    f"Tamanho total enviado ≈ {_total_mb:.1f} MB, que excede o limite de "
+                    f"{TOTAL_UPLOAD_CAP_MB} MB por lote. "
+                    "Envie em partes menores ou compacte antes."
+                )
+                st.stop()  # interrompe o restante da UI para este envio
 
         if ("pages_flat" not in st.session_state) or (st.session_state.get("_unified_sig") != files_sig):
             st.session_state._unified_sig = files_sig
@@ -218,27 +239,18 @@ with st.expander("🧪 Interface Única", expanded=True):
 
                 with left:
                     # miniatura (mantém resolução do pixmap; só limitamos a largura)
-                    if is_pdf(uf):
-                        try:
-                            doc = fitz.open("pdf", data)
-                            pg = doc.load_page(pi)
-                            pix = pg.get_pixmap(dpi=72, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-                            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                            doc.close()
-                        except Exception:
-                            img = Image.new("RGB", (180, 240), (230, 230, 230))
-                    else:
-                        try:
-                            img = Image.open(io.BytesIO(data)).convert("RGB")
-                        except Exception:
-                            img = Image.new("RGB", (180, 240), (230, 230, 230))
-
+                    # PREVIEW via CACHE (um único ponto de geração)
                     rot = st.session_state.rot_map[i]
-                    if rot in (90, 180, 270):
-                        img = img.rotate(-rot, expand=True)
+                    thumb_png = get_thumb(uf, fi, pi, rot)
 
-                    thumb_png = thumb_into_box(img, box_w=240, box_h=320)
-                    st.image(thumb_png, caption=f"{uf.name} · pág {pi+1} · rot {rot}°")
+                    # Fixar largura de exibição para estabilidade do grid
+                    st.image(thumb_png, width=PREVIEW_BOX_W, use_container_width=False)
+
+                    # Caption de 1 linha (trunca o nome para evitar quebra)
+                    _name = getattr(uf, "name", "") or ""
+                    _name = (_name if len(_name) <= 28 else _name[:25] + "…")
+                    st.caption(f"{_name} · pág {pi+1} · rot {rot}°")
+
 
                 with right:
                     # ordem ↑↓ no topo
@@ -251,7 +263,15 @@ with st.expander("🧪 Interface Única", expanded=True):
 
                     # girar
                     if st.button("Girar ↻", key=f"rot_u_{i}", use_container_width=True):
-                        st.session_state.rot_map[i] = {0: 90, 90: 180, 180: 270, 270: 0}[st.session_state.rot_map[i]]
+                        old_rot = st.session_state.rot_map[i]
+                        new_rot = {0: 90, 90: 180, 180: 270, 270: 0}[old_rot]
+                        st.session_state.rot_map[i] = new_rot
+                        # invalida somente a miniatura anterior desta página
+                        try:
+                            old_key = thumb_key(fi, pi, old_rot)
+                            st.session_state._thumb_cache.pop(old_key, None)
+                        except Exception:
+                            pass
                         st.rerun()
 
                     # Compressão individual (não força global)
