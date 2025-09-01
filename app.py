@@ -250,7 +250,7 @@ with st.expander("🧪 Interface Única", expanded=True):
 
             with cols[i % 5]:
                 # --- layout do card: imagem (esq) + controles (dir) ---
-                left, right = st.columns([0.48, 0.52], gap="small")
+                left, right = st.columns([0.42, 0.58], gap="small")
 
                 with left:
                     # miniatura (mantém resolução do pixmap; só limitamos a largura)
