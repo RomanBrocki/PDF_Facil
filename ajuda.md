@@ -33,13 +33,22 @@ App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, mant
   - **Mínima**: rasteriza apenas páginas imagem-only (ganho com baixo custo de CPU).
   - **Média** / **Máxima**: reduções mais fortes; use quando precisar de arquivos pequenos.
 
+ℹ️ Observação:
+  - Nos seletores por página, os níveis aparecem abreviados (**Zero, Mín, Méd, Máx**),
+  - mas logo abaixo do seletor o app mostra o nome completo (**Nenhuma, Mínima, Média, Máxima**).
+  - O seletor global continua usando sempre os nomes completos.
+
 ---
 
 ## 📊 Estimativa (opcional)
 - Mostra “antes → depois” estimado e o percentual de economia.
-- **Guard-rails / Fallbacks**:
-  - Se não houver ganho real, o app mantém o **original** daquela página/arquivo.
-  - Resultado final **nunca fica maior** que a entrada.
+
+---
+
+## 🛡️ Guard-rails / Fallbacks
+- O app faz a checagem **página a página**: cada página só é comprimida se realmente reduzir de tamanho.
+- Se não houver ganho real, o app mantém o **original** daquela página.
+- O resultado final **nunca fica maior** que a entrada.
 
 ---
 

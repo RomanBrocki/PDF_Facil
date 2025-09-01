@@ -10,6 +10,7 @@ import streamlit as st
 
 from app_helpers import (
     LEVELS, LABEL_TO_VAL, VAL_TO_LABEL,
+    VAL_TO_LABEL_INDIV, LABEL_TO_VAL_INDIV,
     TOTAL_UPLOAD_CAP_MB, PREVIEW_PDF_DPI, 
     PREVIEW_BOX_W, PREVIEW_BOX_H,
     format_size, read_uploaded_as_bytes,
@@ -249,7 +250,7 @@ with st.expander("🧪 Interface Única", expanded=True):
 
             with cols[i % 5]:
                 # --- layout do card: imagem (esq) + controles (dir) ---
-                left, right = st.columns([0.56, 0.44], gap="small")
+                left, right = st.columns([0.48, 0.52], gap="small")
 
                 with left:
                     # miniatura (mantém resolução do pixmap; só limitamos a largura)
@@ -288,14 +289,24 @@ with st.expander("🧪 Interface Única", expanded=True):
                             pass
                         st.rerun()
 
-                    # Compressão individual (não força global)
+                    # --- Compressão individual (init 1x por key; sem index em todo rerun)
+                    select_key = f"lvl_u_{i}_{st.session_state.get('ui_rev', 0)}"
+                    options_indiv = list(VAL_TO_LABEL_INDIV.values())  # ["Zero","Mín","Med","Máx"]
+
+                    # Inicializa 1x o valor do widget com base no estado interno atual
+                    if select_key not in st.session_state:
+                        st.session_state[select_key] = VAL_TO_LABEL_INDIV.get(st.session_state.level_page[i], "Zero")
+
                     lvl_lbl = st.selectbox(
                         "Compressão",
-                        ["Nenhuma", "Mínima", "Média", "Máxima"],
-                        index=["Nenhuma","Mínima","Média","Máxima"].index(VAL_TO_LABEL.get(st.session_state.level_page[i], "Nenhuma")),
-                        key=f"lvl_u_{i}_{st.session_state.get('ui_rev', 0)}",
+                        options_indiv,
+                        key=select_key,  # sem 'index=' aqui!
                     )
-                    st.session_state.level_page[i] = LABEL_TO_VAL[lvl_lbl]
+
+                    # Sincroniza o interno ('none|min|med|max') com a escolha
+                    st.session_state.level_page[i] = LABEL_TO_VAL_INDIV[lvl_lbl]
+                    nivel_val = LABEL_TO_VAL_INDIV[lvl_lbl]  # ex.: "med"
+                    st.caption(f"Compressão: {VAL_TO_LABEL[nivel_val]}")
 
                     # manter
                     keep = st.checkbox("Manter", value=st.session_state.keep_map[i], key=f"keep_u_{i}")

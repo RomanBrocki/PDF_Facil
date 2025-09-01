@@ -16,6 +16,9 @@ Criado por **Roman Brocki** em Python, com suporte do **ChatGPT-5** no desenvolv
   - **Mínima** (rasteriza só páginas “imagem-only”)
   - **Média**
   - **Máxima** (downscale forte, mantendo legibilidade)
+- Nos seletores individuais (por página) os níveis aparecem abreviados
+  - (**Zero, Mín, Méd, Máx**) para caber melhor na interface.
+  - Logo abaixo do seletor, o nome completo é exibido (**Nenhuma, Mínima, Média, Máxima**).
 - **Reordenar páginas** (manual ou por critérios: Original, Nome ou Tipo).
 - **Girar páginas** (90/180/270°).
 - **Dividir** (selecionar páginas específicas para um novo PDF).

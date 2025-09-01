@@ -28,7 +28,7 @@ TOTAL_UPLOAD_CAP_MB = 75
 
 # Previews: parâmetros “leves”
 PREVIEW_PDF_DPI = 60
-PREVIEW_BOX_W, PREVIEW_BOX_H = 220, 300
+PREVIEW_BOX_W, PREVIEW_BOX_H = 200, 300
 
 # --------- PRESETS ---------
 # Mapa de níveis internos -> parâmetros da engine
@@ -43,6 +43,9 @@ LEVELS: Dict[str, dict] = {
 
 LABEL_TO_VAL = {"Nenhuma": "none", "Mínima": "min", "Média": "med", "Máxima": "max"}
 VAL_TO_LABEL = {v: k for k, v in LABEL_TO_VAL.items()}
+LABEL_TO_VAL_INDIV = {"Zero": "none", "Mín": "min", "Méd": "med", "Máx": "max"}
+VAL_TO_LABEL_INDIV = {v: k for k, v in LABEL_TO_VAL_INDIV.items()}
+
 
 
 # --------- FORMATAÇÃO ---------
