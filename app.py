@@ -13,6 +13,7 @@ from app_helpers import (
     VAL_TO_LABEL_INDIV, LABEL_TO_VAL_INDIV,
     TOTAL_UPLOAD_CAP_MB, PREVIEW_PDF_DPI, 
     PREVIEW_BOX_W, PREVIEW_BOX_H,
+    RATIO_BY_DENSITY, THUMB_W_BY_DENSITY,
     format_size, read_uploaded_as_bytes,
     notify, render_toasts,
     is_pdf, kind_of, format_pct,
@@ -31,7 +32,6 @@ from pdf_ops import (
 st.set_page_config(page_title="Edição de PDFs e Imagens → PDF", page_icon="📄", layout="wide")
 st.title("📄 PDF Fácil - Ferramentas para PDF")
 st.caption("Edição de PDFs e Imagens com: União de arquivos, Conversão de imagens para PDF, Compressão, Rotação, Reordenação e Divisão.")
-
 
 # Cache de miniaturas: (name, size, page, rot) -> PNG bytes
 if "_thumb_cache" not in st.session_state:
@@ -241,16 +241,32 @@ with st.expander("🧪 Interface Única", expanded=True):
                 # 3) Aplica a nova ordem às 4 listas de estado
                 reorder_page_state(new_order)
                 st.rerun()
+            st.markdown("---")
+            st.markdown("**Editar preview**")
+
+            # Densidade (cards por linha) — init 1x na sessão
+            if "ui_density" not in st.session_state:
+                st.session_state.ui_density = 5  # padrão: 5 colunas
+
+            st.selectbox(
+                "Densidade (cards por linha)",
+                options=[5, 4, 3],
+                key="ui_density",                        
+                help="5 (mais compacto) → 3 (mais confortável)",
+            )
+
+            # espelho opcional para leitura no restante do código
+            st.session_state.density = st.session_state.ui_density
         # =====================  FIM ORDENAR / REORDENAR PÁGINAS  =====================
         
-        cols = st.columns(5)
+        cols = st.columns(st.session_state.density)
         for i, (fi, pi) in enumerate(st.session_state.pages_flat):
             uf = up_uni[fi]
             
 
-            with cols[i % 5]:
+            with cols[i % st.session_state.density]:
                 # --- layout do card: imagem (esq) + controles (dir) ---
-                left, right = st.columns([0.42, 0.58], gap="small")
+                left, right = st.columns(RATIO_BY_DENSITY[st.session_state.density], gap="small")
 
                 with left:
                     # miniatura (mantém resolução do pixmap; só limitamos a largura)
@@ -259,7 +275,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                     thumb_png = get_thumb(uf, fi, pi, rot)
 
                     # Fixar largura de exibição para estabilidade do grid
-                    st.image(thumb_png, width=PREVIEW_BOX_W, use_container_width=False)
+                    st.image(thumb_png, width=THUMB_W_BY_DENSITY[st.session_state.density], use_container_width=False)
 
                     # Caption de 1 linha (trunca o nome para evitar quebra)
                     _name = getattr(uf, "name", "") or ""
@@ -290,25 +306,42 @@ with st.expander("🧪 Interface Única", expanded=True):
                         st.rerun()
 
                     # --- Compressão individual (init 1x por key; sem index em todo rerun)
+                    # --- Compressão individual (init 1x por key; opções conforme densidade)
                     select_key = f"lvl_u_{i}_{st.session_state.get('ui_rev', 0)}"
-                    options_indiv = list(VAL_TO_LABEL_INDIV.values())  # ["Zero","Mín","Med","Máx"]
 
-                    # Inicializa 1x o valor do widget com base no estado interno atual
-                    if select_key not in st.session_state:
-                        st.session_state[select_key] = VAL_TO_LABEL_INDIV.get(st.session_state.level_page[i], "Zero")
+                    # Em densidade 3/4 mostramos rótulos longos; em 5 usamos abreviações
+                    use_long = st.session_state.density in (3, 4)
+
+                    if use_long:
+                        options_indiv = ["Nenhuma", "Mínima", "Média", "Máxima"]
+                    else:
+                        # usa os rótulos curtos padronizados no helpers: ["Zero","Mín","Méd","Máx"]
+                        options_indiv = list(VAL_TO_LABEL_INDIV.values())
+
+                    # Valor interno atual desta página
+                    cur_internal = st.session_state.level_page[i]  # "none"|"min"|"med"|"max"
+                    cur_label = (VAL_TO_LABEL[cur_internal] if use_long else VAL_TO_LABEL_INDIV[cur_internal])
+
+                    # Inicializa 1x OU realinha quando a densidade muda (se o valor salvo não existir nas novas opções)
+                    if (select_key not in st.session_state) or (st.session_state[select_key] not in options_indiv):
+                        st.session_state[select_key] = cur_label
 
                     lvl_lbl = st.selectbox(
                         "Compressão",
                         options_indiv,
-                        key=select_key,  # sem 'index=' aqui!
+                        key=select_key,   # sem 'index' aqui (evita o bug dos dois cliques)
                     )
 
-                    # Sincroniza o interno ('none|min|med|max') com a escolha
-                    st.session_state.level_page[i] = LABEL_TO_VAL_INDIV[lvl_lbl]
-                    nivel_val = LABEL_TO_VAL_INDIV[lvl_lbl]  # ex.: "med"
-                    st.caption(f"Compressão: {VAL_TO_LABEL[nivel_val]}")
+                    # Atualiza o nível interno conforme o conjunto em uso
+                    if use_long:
+                        st.session_state.level_page[i] = LABEL_TO_VAL[lvl_lbl]
+                    else:
+                        st.session_state.level_page[i] = LABEL_TO_VAL_INDIV[lvl_lbl]
 
-                    # manter
+                    # Caption sempre com nome completo
+                    nivel_val = st.session_state.level_page[i]  # ex.: "med"
+                    st.caption(f"Compressão {VAL_TO_LABEL[nivel_val]}")
+                    # manter / remover            
                     keep = st.checkbox("Manter", value=st.session_state.keep_map[i], key=f"keep_u_{i}")
                     st.session_state.keep_map[i] = keep
 

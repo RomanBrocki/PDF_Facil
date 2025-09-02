@@ -34,9 +34,12 @@ App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, mant
   - **Média** / **Máxima**: reduções mais fortes; use quando precisar de arquivos pequenos.
 
 ℹ️ Observação:
-  - Nos seletores por página, os níveis aparecem abreviados (**Zero, Mín, Méd, Máx**),
-  - mas logo abaixo do seletor o app mostra o nome completo (**Nenhuma, Mínima, Média, Máxima**).
-  - O seletor global continua usando sempre os nomes completos.
+  - O seletor **Densidade (cards por linha)**, disponível em “Reordenar páginas → Editar preview”, permite escolher entre **5, 4 ou 3 colunas** no grid.  
+  - Quando a densidade é **5**, os rótulos de compressão individual aparecem abreviados (**Zero, Mín, Méd, Máx**).  
+  - Em densidade **3 ou 4**, aparecem por extenso (**Nenhuma, Mínima, Média, Máxima**). 
+  - mas logo abaixo do seletor o app mostra o nome completo (**Nenhuma, Mínima, Média, Máxima**). 
+  - O seletor **global** de compressão continua sempre usando os nomes completos.
+  
 
 ---
 

@@ -46,6 +46,18 @@ VAL_TO_LABEL = {v: k for k, v in LABEL_TO_VAL.items()}
 LABEL_TO_VAL_INDIV = {"Zero": "none", "Mín": "min", "Méd": "med", "Máx": "max"}
 VAL_TO_LABEL_INDIV = {v: k for k, v in LABEL_TO_VAL_INDIV.items()}
 
+# ---- Densidade do grid: colunas e largura do thumb por densidade (3, 4, 5)
+RATIO_BY_DENSITY = {
+    3: (0.50, 0.50),
+    4: (0.45, 0.55),
+    5: (0.40, 0.60),
+}
+THUMB_W_BY_DENSITY = {
+    3: 280,
+    4: 220,
+    5: 180,
+}
+
 
 
 # --------- FORMATAÇÃO ---------

@@ -16,8 +16,10 @@ Criado por **Roman Brocki** em Python, com suporte do **ChatGPT-5** no desenvolv
   - **Mínima** (rasteriza só páginas “imagem-only”)
   - **Média**
   - **Máxima** (downscale forte, mantendo legibilidade)
-- Nos seletores individuais (por página) os níveis aparecem abreviados
-  - (**Zero, Mín, Méd, Máx**) para caber melhor na interface.
+- **Densidade do grid**: escolha entre 5, 4 ou 3 colunas no preview.  
+  - Em **5 colunas** os seletores individuais usam abreviações (**Zero, Mín, Méd, Máx**) para caber no layout.  
+  - Em **3 ou 4 colunas** eles exibem os nomes completos (**Nenhuma, Mínima, Média, Máxima**).  
+  - Essa troca é automática e só afeta a interface; o processamento interno é sempre consistente.
   - Logo abaixo do seletor, o nome completo é exibido (**Nenhuma, Mínima, Média, Máxima**).
 - **Reordenar páginas** (manual ou por critérios: Original, Nome ou Tipo).
 - **Girar páginas** (90/180/270°).
