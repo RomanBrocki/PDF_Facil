@@ -275,7 +275,7 @@ with st.expander("🧪 Interface Única", expanded=True):
                     thumb_png = get_thumb(uf, fi, pi, rot)
 
                     # Fixar largura de exibição para estabilidade do grid
-                    st.image(thumb_png, width=THUMB_W_BY_DENSITY[st.session_state.density], use_container_width=False)
+                    st.image(thumb_png, width=THUMB_W_BY_DENSITY[st.session_state.density])
 
                     # Caption de 1 linha (trunca o nome para evitar quebra)
                     _name = getattr(uf, "name", "") or ""
