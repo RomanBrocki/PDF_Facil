@@ -338,9 +338,10 @@ with st.expander("🧪 Interface Única", expanded=True):
                     else:
                         st.session_state.level_page[i] = LABEL_TO_VAL_INDIV[lvl_lbl]
 
-                    # Caption sempre com nome completo
-                    nivel_val = st.session_state.level_page[i]  # ex.: "med"
-                    st.caption(f"Compressão {VAL_TO_LABEL[nivel_val]}")
+                    # Caption com nome completo apenas quando em densidade 5
+                    if st.session_state.density == 5:
+                        nivel_val = st.session_state.level_page[i]  # ex.: "med"
+                        st.caption(f"Compressão {VAL_TO_LABEL[nivel_val]}")
                     # manter / remover            
                     keep = st.checkbox("Manter", value=st.session_state.keep_map[i], key=f"keep_u_{i}")
                     st.session_state.keep_map[i] = keep
