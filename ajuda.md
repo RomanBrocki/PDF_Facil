@@ -80,6 +80,6 @@ App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, mant
 ## 📬 Suporte & Código
 - Dúvidas/bugs: abra uma **Issue** no GitHub do projeto.
 
-- Código aberto disponível em: [GitHub - Roman Brocki](https://github.com/romanbrocki/converte_une_pdf)  
+- Código aberto disponível em: [GitHub - Roman Brocki](https://github.com/RomanBrocki/PDF_Facil)  
 
 ---
