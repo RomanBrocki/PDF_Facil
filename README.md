@@ -12,10 +12,10 @@ Criado por **Roman Brocki** em Python, com suporte do **ChatGPT-5** no desenvolv
 - **Unir PDFs e imagens** em um único PDF.
 - **Converter JPG/PNG → PDF** (com ou sem compressão).
 - **Comprimir PDFs** em 4 níveis:
-  - **Nenhuma**
-  - **Mínima** (rasteriza só páginas “imagem-only”)
-  - **Média**
-  - **Máxima** (downscale forte, mantendo legibilidade)
+  - **Nenhuma**: mantém como está.  
+  - **Mínima**: comprime imagens de páginas que já eram imagem (ex.: PDFs escaneados).  
+  - **Média**: converte todas as páginas em imagem para reduzir o tamanho.  
+  - **Máxima**: mesma lógica da Média, mas com compressão mais forte (mantendo legibilidade).
 - **Densidade do grid**: escolha entre 5, 4 ou 3 colunas no preview.  
   - Em **5 colunas** os seletores individuais usam abreviações (**Zero, Mín, Méd, Máx**) para caber no layout, e logo abaixo aparece o nome completo (**Nenhuma, Mínima, Média, Máxima**).  
   - Em **3 ou 4 colunas** eles exibem diretamente os nomes completos (**Nenhuma, Mínima, Média, Máxima**).  
@@ -40,7 +40,7 @@ Criado por **Roman Brocki** em Python, com suporte do **ChatGPT-5** no desenvolv
 
 - **`app.py`** — interface **Streamlit** (upload, grid de páginas, ações, download).  
 - **`app_helpers.py`** — utilitários de UI e estado (presets de compressão, formatação, notificações, ordenação, thumbnails/cache, etc.).  
-- **`pdf_ops.py`** — **motor** (estimativas, compressão real, rasterização, união, divisão, rotação). Tudo puro em bytes, sem Streamlit.  
+- **`pdf_ops.py`** — **motor** (estimativas, compressão real, conversão de página em imagem *(rasterização)*, união, divisão, rotação). Tudo puro em bytes, sem Streamlit.
 - **`requirements.txt`** — dependências mínimas (streamlit, PyMuPDF, pypdf, img2pdf, Pillow).  
 - **`ajuda.md`** — manual curto exibido no app (renderizado via `st.markdown` dentro de um expander).  
 - **`.streamlit/config.toml`** — configurações do servidor (ex.: limite de upload).

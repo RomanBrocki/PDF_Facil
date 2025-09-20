@@ -29,9 +29,10 @@ App simples: você envia **PDF/JPG/PNG**, organiza no grid (ordenar, girar, mant
 ## 📉 Compressão
 - **Global** (tudo) ou **individual** (por página).
 - Perfis:
-  - **Nenhuma**: mantém como está.
-  - **Mínima**: rasteriza apenas páginas imagem-only (ganho com baixo custo de CPU).
-  - **Média** / **Máxima**: reduções mais fortes; use quando precisar de arquivos pequenos.
+  - **Nenhuma**: mantém como está.  
+  - **Mínima**: comprime imagens de páginas que já eram imagem (ex.: PDFs escaneados).  
+  - **Média** / **Máxima**: convertem todas as páginas em imagem, reduzindo ainda mais o tamanho mas tornando o texto não copiável/editável.
+
 
 ℹ️ Observação:
   - O seletor **Densidade (cards por linha)**, disponível em “Reordenar páginas → Editar preview”, permite escolher entre **5, 4 ou 3 colunas** no grid.  
