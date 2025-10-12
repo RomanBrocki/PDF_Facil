@@ -17,7 +17,6 @@ from __future__ import annotations
 import io
 from typing import Dict, Iterable, List, Tuple, cast, Any
 
-import math, gc
 import img2pdf
 import fitz  # PyMuPDF
 from PIL import Image
@@ -32,113 +31,12 @@ except AttributeError:
 
 from pypdf import PdfReader, PdfWriter
 
-from .engine_config import LEVELS
-
-print(">>> PDF_OPS LOCAL CARREGADO:", __file__)
-
-
-# ===========================
-#   HELPER: JPEG COM QUALIDADE AJUSTÁVEL
-# ===========================
-def _jpeg_bytes_with_band(
-    img: Image.Image,
-    q_start: int,
-    keep_min: float | None,
-    keep_max: float | None,
-    baseline_len: int,
-    q_floor: int = 40,
-    subsamp_default: int | None = None,
-) -> tuple[bytes, bool]:
-    """
-    Re-encode em JPEG ajustando qualidade para manter o tamanho DENTRO de uma faixa
-    medido contra 'baseline_len' (tamanho do PDF-base do original).
-    Retorna (jpeg_bytes, reached_floor) onde reached_floor=True indica que o piso foi atingido.
-    """
-    # sempre RGB para JPEG
-    if img.mode not in ("RGB",):
-        img = img.convert("RGB")
-
-    def _enc(qv: int, subsamp: int | None = None,
-            optimize: bool = True, progressive: bool = True) -> bytes:
-        buf = io.BytesIO()
-        try:
-            use_sub = subsamp if subsamp is not None else subsamp_default
-            if use_sub is None:
-                img.save(buf, "JPEG", quality=int(qv), optimize=optimize, progressive=progressive)
-            else:
-                img.save(buf, "JPEG", quality=int(qv), optimize=optimize, progressive=progressive, subsampling=use_sub)
-        except TypeError:
-            img.save(buf, "JPEG", quality=int(qv), optimize=optimize, progressive=progressive)
-        return buf.getvalue()
-
-
-    q = max(1, min(int(q_start), 95))
-    out = _enc(q)
-
-    # 1) teto (compressão mínima)
-    if keep_max is not None:
-        ceil_len = int(baseline_len * keep_max)
-        while len(out) > ceil_len and q > q_floor:
-            q -= 3
-            out = _enc(q)
-        # 1a) Se não alcançou o teto mesmo no q_floor, faz um downscale guiado (apenas para med/max)
-    if keep_max is not None and len(out) > ceil_len and q <= q_floor and q_floor <= 32:
-        # razão alvo: quanto precisamos reduzir os bytes do JPEG
-        target_ratio = ceil_len / max(1, len(out))  # (0,1]
-        # bytes ~ pixels * fator(q). Use a raiz para projetar escala de lado:
-        scale = max(0.60, min(0.98, math.sqrt(target_ratio) * 0.98))
-
-        w, h = img.size
-        # limite de segurança para não destruir thumbs pequenas
-        MIN_LONG_SIDE = 960
-
-        # itera reamostrando até atingir o teto ou bater no limite
-        while len(out) > ceil_len and max(w, h) > MIN_LONG_SIDE:
-            w = max(1, int(w * scale)); h = max(1, int(h * scale))
-            img = img.resize((w, h), RESAMPLE_LANCZOS)
-            out = _enc(q)  # mantém o 'q' atual (no q_floor), reaplica subsampling default
-
-
-    # 2) piso (evitar secar demais)
-    reached_floor = True
-    if keep_min is not None:
-        floor_len = int(baseline_len * keep_min)
-        while len(out) < floor_len and q < 95:
-            q += 3
-            out = _enc(q)
-
-        if len(out) < floor_len:
-            # tentar engordar: 4:4:4 + quality 100
-            out2 = _enc(100, subsamp=0)
-            if len(out2) > len(out):
-                out = out2
-            if len(out) < floor_len:
-                # último recurso: sem optimize/progressive
-                out3 = _enc(100, subsamp=0, optimize=False, progressive=False)
-                if len(out3) > len(out):
-                    out = out3
-
-        reached_floor = (len(out) >= floor_len)
-
-    return out, reached_floor
-
-
-
+from app_helpers import LEVELS
 
 
 # ===========================
 #   ESTIMATIVAS (rápidas)
 # ===========================
-def _cap_dpi_for_page(page, dpi, max_megapixels=80):
-    """Limita o DPI efetivo para evitar > ~80MP por página (ajuste se quiser)."""
-    r = page.rect
-    px = (r.width * dpi / 72.0) * (r.height * dpi / 72.0)
-    max_px = max_megapixels * 1_000_000
-    if px <= max_px:
-        return dpi
-    scale = math.sqrt(max_px / px)
-    return max(72, int(dpi * scale))
-
 def _is_image_only(page: "fitz.Page") -> bool:
 
 
@@ -189,12 +87,8 @@ def estimate_pdf_size(pdf_bytes: bytes, level: str) -> int:
         jpg_pages = []
         for i in range(doc.page_count):
             pg = doc.load_page(i)
-            dpi_eff = _cap_dpi_for_page(pg, dpi)
-            mat = fitz.Matrix(dpi_eff/72.0, dpi_eff/72.0)
-            pix = pg.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)  # pyright: ignore[reportAttributeAccessIssue]
+            pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
             jpg_pages.append(pix.tobytes("jpeg", jpg_quality=jpg_q))
-            del pix
-
         doc.close()
         try:
             est_pdf = cast(bytes, img2pdf.convert(jpg_pages))
@@ -211,12 +105,8 @@ def estimate_pdf_size(pdf_bytes: bytes, level: str) -> int:
             dst_doc.insert_pdf(src_doc, from_page=i, to_page=i)
 
         def _rasterize_to(dst_doc, page_obj: "fitz.Page", dpi_val: int, jpeg_q: int):
-            dpi_eff = _cap_dpi_for_page(page_obj, dpi_val)
-            mat = fitz.Matrix(dpi_eff/72.0, dpi_eff/72.0)
-            pix = page_obj.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)  # pyright: ignore[reportAttributeAccessIssue]
+            pix = page_obj.get_pixmap(dpi=dpi_val, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
             img_bytes = pix.tobytes("jpeg", jpg_quality=jpeg_q)
-            del pix
-
             rect = page_obj.rect
             p = dst_doc.new_page(width=rect.width, height=rect.height)
             p.insert_image(rect, stream=img_bytes)
@@ -266,12 +156,8 @@ def estimate_pdf_page_size(pdf_bytes: bytes, page_idx: int, level: str) -> int:
         return est
 
     if mode == "all":
-        dpi_eff = _cap_dpi_for_page(pg, dpi)
-        mat = fitz.Matrix(dpi_eff/72.0, dpi_eff/72.0)
-        pix = pg.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)  # pyright: ignore[reportAttributeAccessIssue]
+        pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
         jpg_b = pix.tobytes("jpeg", jpg_quality=jpg_q)
-        del pix
-
         try:
             est_pdf = cast(bytes, img2pdf.convert(jpg_b))
         except Exception:
@@ -281,12 +167,8 @@ def estimate_pdf_page_size(pdf_bytes: bytes, page_idx: int, level: str) -> int:
 
     if mode == "smart":
         if _is_image_only(pg):
-            dpi_eff = _cap_dpi_for_page(pg, dpi)
-            mat = fitz.Matrix(dpi_eff/72.0, dpi_eff/72.0)
-            pix = pg.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)  # pyright: ignore[reportAttributeAccessIssue]
+            pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
             jpg_b = pix.tobytes("jpeg", jpg_quality=jpg_q)
-            del pix
-
             try:
                 est_pdf = cast(bytes, img2pdf.convert(jpg_b))
             except Exception:
@@ -305,69 +187,51 @@ def estimate_pdf_page_size(pdf_bytes: bytes, page_idx: int, level: str) -> int:
 
 
 def estimate_image_pdf_size(img_bytes: bytes, level: str) -> int:
-    """Estima o tamanho do PDF (1 página) gerado a partir de uma imagem, mirando a faixa vs PDF-base."""
+    """Estima o tamanho do PDF (1 página) gerado a partir de uma imagem.
 
-    # PDF-base do original (baseline)
-    try:
-        pdf_orig = cast(bytes, img2pdf.convert(img_bytes))
-    except Exception:
-        pdf_orig = img_bytes
-    base_len = len(pdf_orig)
+    Args:
+        img_bytes (bytes): PNG/JPG de entrada.
+        level (str): 'none'|'min'|'med'|'max'.
+
+    Returns:
+        int: Tamanho estimado em bytes do PDF de 1 página.
+    """
 
     params = LEVELS.get(level or "none", LEVELS["none"])
     mode = params["mode"]
     if mode == "none":
-        return base_len
+        try:
+            return len(cast(bytes, img2pdf.convert(img_bytes)))
+        except Exception:
+            return len(img_bytes)
 
     im = Image.open(io.BytesIO(img_bytes))
     if im.mode in ("RGBA", "P"):
         im = im.convert("RGB")
 
-    # --- Regras por nível (use seus números ajustados) ---
     if level == "min":
-        q_start = 88
-        keep_max = 0.75   # <= 75% do baseline → ≥25% de redução
-        keep_min = 0.65   # >= 65% do baseline → ≤35% de redução
-        max_side = None
+        max_side, quality = 2400, 85
     elif level == "med":
-        q_start = 75
-        keep_max = 0.48   # <= 50% → ≥50% de redução
-        keep_min = 0.30   # >= 40% → ≤60% de redução
-        max_side = 1280
+        max_side, quality = 2000, 70
     elif level == "max":
-        q_start = 65
-        keep_max = 0.30   # <= 30% → ≥70% de redução
-        keep_min = None
-        max_side = 2000
+        max_side, quality = 1600, 50
     else:
-        return base_len
+        max_side, quality = None, 95
 
-    # Downscale (se previsto)
     if max_side is not None:
         w, h = im.size
         scale = min(max_side / max(w, h), 1.0)
         if scale < 1.0:
-            im = im.resize((int(w*scale), int(h*scale)), RESAMPLE_LANCZOS)
+            im = im.resize((int(w * scale), int(h * scale)), RESAMPLE_LANCZOS)
 
-    # JPEG dentro da faixa vs baseline
-    q_floor = 45 if level == "min" else (30 if level == "med" else 24)
-    subsamp = None if level == "min" else 2  # 4:2:0 no méd/max
-    jpg_bytes, ok_floor = _jpeg_bytes_with_band(
-        im, q_start, keep_min, keep_max, base_len, q_floor=q_floor, subsamp_default=subsamp
-    )
+    jpg_buf = io.BytesIO()
+    im.save(jpg_buf, format="JPEG", quality=quality, optimize=True, progressive=True)
+    jpg_bytes = jpg_buf.getvalue()
 
-
-    # Quando o piso não for alcançado no min/med, você PODE manter o JPEG mesmo assim.
-    # Se preferir o fallback antigo, reative aqui. Por padrão, vamos em frente.
-
-    # Monta PDF do candidato e aplica guard-rail vs baseline
     try:
-        pdf_out = cast(bytes, img2pdf.convert(jpg_bytes))
+        return len(cast(bytes, img2pdf.convert(jpg_bytes)))
     except Exception:
-        pdf_out = jpg_bytes + b"\x00" * 1024
-
-    return len(pdf_out) if len(pdf_out) < base_len else base_len
-
+        return len(jpg_bytes) + 1024
 
 
 # ===========================
@@ -443,67 +307,50 @@ def compress_pdf(pdf_bytes: bytes, level: str | None) -> bytes:
 
 
 def image_to_pdf_bytes(file_bytes: bytes, level: str | None) -> bytes:
-    """Converte PNG/JPG para PDF (1 página), mira a faixa vs PDF-base e mantém guard-rail."""
+    """Converte PNG/JPG para PDF de 1 página (com compressão opcional).
 
-    # PDF-base do original (baseline)
-    try:
-        pdf_orig = cast(bytes, img2pdf.convert(file_bytes))
-    except Exception:
-        pdf_orig = file_bytes
-    base_len = len(pdf_orig)
+    Args:
+        file_bytes (bytes): Imagem de entrada.
+        level (str | None): 'none'|'min'|'med'|'max' ou None.
 
-    if not level or level == "none":
-        return pdf_orig
+    Returns:
+        bytes: PDF resultante (1 página).
+    """
 
+    if level in (None, "none"):
+        try:
+            return cast(bytes, img2pdf.convert(file_bytes))
+        except Exception:
+            pass
+
+    # Abre imagem e padroniza
     im = Image.open(io.BytesIO(file_bytes))
     if im.mode in ("RGBA", "P"):
         im = im.convert("RGB")
 
+    # Parâmetros por nível (alinhados com presets)
     if level == "min":
-        q_start = 88
-        keep_max = 0.75
-        keep_min = 0.65
-        max_side = None
+        max_side, quality = 2400, 85
     elif level == "med":
-        q_start = 75
-        keep_max = 0.48
-        keep_min = 0.30
-        max_side = 1280
+        max_side, quality = 2000, 70
     elif level == "max":
-        q_start = 65
-        keep_max = 0.30
-        keep_min = None
-        max_side = 2000
+        max_side, quality = 1600, 50
     else:
-        return pdf_orig
+        max_side, quality = None, 95
 
+    # Downscale se necessário
     if max_side is not None:
         w, h = im.size
         scale = min(max_side / max(w, h), 1.0)
         if scale < 1.0:
-            im = im.resize((int(w*scale), int(h*scale)), RESAMPLE_LANCZOS)
+            im = im.resize((int(w * scale), int(h * scale)), RESAMPLE_LANCZOS)
 
-    q_floor = 45 if level == "min" else (30 if level == "med" else 24)
-    subsamp = None if level == "min" else 2  # 4:2:0 no méd/max
-    jpg_bytes, ok_floor = _jpeg_bytes_with_band(
-        im, q_start, keep_min, keep_max, base_len, q_floor=q_floor, subsamp_default=subsamp
-    )
+    # Recompressão JPEG e wrap em PDF
+    jpg_buf = io.BytesIO()
+    im.save(jpg_buf, format="JPEG", quality=quality, optimize=True, progressive=True)
+    jpg_bytes = jpg_buf.getvalue()
 
-
-    # Opcional: fallback “soft” se preferir (desativado por padrão)
-    # if not ok_floor and level in ("min", "med"):
-    #     return pdf_orig
-
-    # Converte candidato para PDF e aplica guard-rail
-    try:
-        pdf_out = cast(bytes, img2pdf.convert(jpg_bytes))
-    except Exception:
-        # fallback simples: ainda garante bytes “sized”
-        pdf_out = jpg_bytes + b"\x00" * 1024
-
-    return pdf_out if len(pdf_out) < base_len else pdf_orig
-
-
+    return cast(bytes, img2pdf.convert(jpg_bytes))
 
 
 # ===========================
