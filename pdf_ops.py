@@ -143,6 +143,24 @@ def _is_image_only(page: "fitz.Page") -> bool:
         has_vectors = False
     return (not has_text) and (not has_vectors)
 
+def _cap_dpi_for_page(page: "fitz.Page", target_dpi: int) -> int:
+    """
+    Limita o DPI efetivo para evitar rasterizações gigantes em páginas muito grandes.
+    Mantém ~até 5MP por página como alvo. Se não conseguir medir, devolve o target_dpi.
+    """
+    try:
+        rect = page.rect
+        w_in = rect.width / 72.0
+        h_in = rect.height / 72.0
+        # pixels estimados no DPI alvo
+        px = (w_in * target_dpi) * (h_in * target_dpi)
+        if px <= 5_000_000:
+            return int(target_dpi)
+        scale = (5_000_000 / max(px, 1.0)) ** 0.5
+        return max(72, int(target_dpi * scale))
+    except Exception:
+        return int(target_dpi)
+
 
 def estimate_pdf_size(pdf_bytes: bytes, level: str) -> int:
     """Estima o tamanho final de um PDF após aplicar um nível de compressão.
@@ -548,54 +566,81 @@ def merge_pages(
         # kind == 'pdf'
         try:
             src = fitz.open("pdf", data)
-            page_idx = max(0, min(page_idx, src.page_count - 1))
-            pg = src.load_page(page_idx)
-
-            if not level or level == "none":
-                # cópia 1:1 da página
-                dst.insert_pdf(src, from_page=page_idx, to_page=page_idx)
-                if angle:
-                    dst[-1].set_rotation(angle)  # pyright: ignore[reportAttributeAccessIssue]
+            if page_idx < 0 or page_idx >= src.page_count:
                 src.close()
                 continue
 
-            # rasterização desta página respeitando LEVELS (mesma lógica da compressão)
-            params = LEVELS.get(level, LEVELS["none"])
-            mode = params["mode"]
-            dpi = params["dpi"]
-            jpg_q = params["jpg_q"]
+            # Página fonte
+            pg = src.load_page(page_idx)
 
-            if mode == "smart":
-                # só rasteriza se for 'imagem-only'; senão, copia 1:1
-                if _is_image_only(pg):
-                    pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-                    img_bytes = pix.tobytes("jpeg", jpg_quality=jpg_q)
-                    rect = pg.rect
-                    p = dst.new_page(width=rect.width, height=rect.height) # pyright: ignore[reportAttributeAccessIssue]
-                    p.insert_image(rect, stream=img_bytes)
-                    if angle:
-                        dst[-1].set_rotation(angle)  # pyright: ignore[reportAttributeAccessIssue]
-                else:
-                    dst.insert_pdf(src, from_page=page_idx, to_page=page_idx)
-                    if angle:
-                        dst[-1].set_rotation(angle)  # pyright: ignore[reportAttributeAccessIssue]
+            # 1) base_bytes: PDF 1:1 só com esta página (nenhuma alteração)
+            base_doc = fitz.open()
+            base_doc.insert_pdf(src, from_page=page_idx, to_page=page_idx)
+            base_bytes = base_doc.write(garbage=4, deflate=True, clean=True)  # pyright: ignore[reportArgumentType]
+            base_doc.close()
 
-            elif mode == "all":
-                # rasteriza esta página
-                pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-                img_bytes = pix.tobytes("jpeg", jpg_quality=jpg_q)
-                rect = pg.rect
-                p = dst.new_page(width=rect.width, height=rect.height) # pyright: ignore[reportAttributeAccessIssue]
-                p.insert_image(rect, stream=img_bytes)
-                if angle:
-                    dst[-1].set_rotation(angle)  # pyright: ignore[reportAttributeAccessIssue]
+            # 2) helper local: gera candidato conforme 'level_key' e LEVELS
+            def _cand(level_key: str) -> bytes:
+                params = LEVELS.get(level_key, LEVELS["none"])
+                mode = params["mode"]
+                dpi  = params["dpi"]
+                jpg_q = params["jpg_q"]
+
+                # none -> sempre devolve o base
+                if mode == "none":
+                    return base_bytes
+
+                # smart: só rasteriza se for imagem-only, senão mantém base
+                if mode == "smart" and not _is_image_only(pg):
+                    return base_bytes
+
+                # all OU smart+imagem-only -> rasteriza esta página
+                dpi_eff = _cap_dpi_for_page(pg, int(dpi or 150))
+                mat = fitz.Matrix(dpi_eff/72.0, dpi_eff/72.0)
+                pix = pg.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)  # pyright: ignore[reportAttributeAccessIssue]
+                jpg_b = pix.tobytes("jpeg", jpg_quality=int(jpg_q or 75))
+                del pix
+                try:
+                    return cast(bytes, img2pdf.convert(jpg_b))  # embrulha em PDF 1-pag
+                except Exception:
+                    # fallback bruto (raríssimo): retorna o JPEG solto; inserir_pdf abaixo falharia,
+                    # então preferimos cair pro base_bytes na comparação.
+                    return jpg_b
+
+            # 3) gera os candidatos respeitando monotonicidade (max ≤ med ≤ min ≤ base)
+            #    - min: compara base vs min
+            #    - med: compara base vs min vs med
+            #    - max: compara base vs min vs med vs max
+            if level == "min":
+                cand_min = _cand("min")
+                chosen = min((base_bytes, cand_min), key=len)
+            elif level == "med":
+                cand_min = _cand("min")
+                cand_med = _cand("med")
+                chosen = min((base_bytes, cand_min, cand_med), key=len)
+            elif level == "max":
+                cand_min = _cand("min")
+                cand_med = _cand("med")
+                cand_max = _cand("max")
+                chosen = min((base_bytes, cand_min, cand_med, cand_max), key=len)
             else:
-                # fallback: cópia crua
-                dst.insert_pdf(src, from_page=page_idx, to_page=page_idx)
-                if angle:
-                    dst[-1].set_rotation(angle)  # pyright: ignore[reportAttributeAccessIssue]
+                chosen = base_bytes  # none
+
+            # 4) insere a VERSÃO MENOR no destino e aplica rotação
+            try:
+                one = fitz.open("pdf", chosen)  # preferimos inserir PDF bem-formado
+            except Exception:
+                # se chosen não for PDF (fallback raríssimo), volta para base
+                one = fitz.open("pdf", base_bytes)
+
+            dst.insert_pdf(one, from_page=0, to_page=0)
+            one.close()
+            if angle:
+                dst[-1].set_rotation(angle)  # pyright: ignore[reportAttributeAccessIssue]
 
             src.close()
+            continue
+
 
         except Exception:
             # falha isolada numa página não bloqueia o restante
