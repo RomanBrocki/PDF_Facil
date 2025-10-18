@@ -12,10 +12,15 @@ Criado por **Roman Brocki** em Python, com suporte do **ChatGPT-5** no desenvolv
 - **Unir PDFs e imagens** em um único PDF.
 - **Converter JPG/PNG → PDF** (com ou sem compressão).
 - **Comprimir PDFs** em 4 níveis:
-  - **Nenhuma**: mantém como está.  
-  - **Mínima**: comprime imagens de páginas que já eram imagem (ex.: PDFs escaneados).  
-  - **Média**: converte todas as páginas em imagem para reduzir o tamanho.  
-  - **Máxima**: mesma lógica da Média, mas com compressão mais forte (mantendo legibilidade).
+  - **Nenhuma** — mantém as páginas originais 1:1.
+  - **Mínima** — só rasteriza páginas que já eram imagem (“imagem-only”).
+  - **Média** — rasteriza mais páginas com downscale moderado.
+  - **Máxima** — rasteriza todas as páginas com forte downscale.
+  
+  > 🔹 O motor agora aplica **guard-rails inteligentes**:  
+  > sempre compara o resultado comprimido com o original e escolhe o **menor tamanho real**.  
+  > Assim, PDFs leves (vetoriais ou texto) não aumentam de tamanho — mesmo em níveis altos.
+
 - **Densidade do grid**: escolha entre 5, 4 ou 3 colunas no preview.  
   - Em **5 colunas** os seletores individuais usam abreviações (**Zero, Mín, Méd, Máx**) para caber no layout, e logo abaixo aparece o nome completo (**Nenhuma, Mínima, Média, Máxima**).  
   - Em **3 ou 4 colunas** eles exibem diretamente os nomes completos (**Nenhuma, Mínima, Média, Máxima**).  
