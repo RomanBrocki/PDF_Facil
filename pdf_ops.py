@@ -142,6 +142,70 @@ def _is_image_only(page: "fitz.Page") -> bool:
     except Exception:
         has_vectors = False
     return (not has_text) and (not has_vectors)
+def _estimate_pdf_page_len_guardrail(pdf_bytes: bytes, page_idx: int, level: str) -> int:
+    """
+    Estima o tamanho *escolhido* pelo guard-rail para UMA página de PDF.
+
+    Reproduz a mesma regra do merge_pages:
+      - base_bytes = PDF 1:1 dessa página
+      - candidatos conforme 'level' e LEVELS
+      - compara base vs candidatos e retorna o menor len(...)
+    """
+    try:
+        src = fitz.open("pdf", pdf_bytes)
+        if page_idx < 0 or page_idx >= src.page_count:
+            src.close()
+            return 0
+
+        # 1) base: a página 1:1 como PDF solo
+        base_doc = fitz.open()
+        base_doc.insert_pdf(src, from_page=page_idx, to_page=page_idx)
+        base_bytes = base_doc.write(garbage=4, deflate=True, clean=True)  # pyright: ignore[reportArgumentType]
+        base_doc.close()
+        base_len = len(base_bytes)
+
+        # 2) helper de candidato
+        params = LEVELS.get(level or "none", LEVELS["none"])
+        mode = params["mode"]; dpi = int(params["dpi"] or 150); jpg_q = int(params["jpg_q"] or 75)
+        pg = src.load_page(page_idx)
+
+        def _cand_len(level_key: str) -> int:
+            pr = LEVELS.get(level_key, LEVELS["none"])
+            md = pr["mode"]; dp = int(pr["dpi"] or 150); jq = int(pr["jpg_q"] or 75)
+
+            if md == "none":
+                return base_len
+
+            if md == "smart" and not _is_image_only(pg):
+                return base_len
+
+            dpi_eff = _cap_dpi_for_page(pg, dp)  # usa o mesmo cap do merge
+            mat = fitz.Matrix(dpi_eff/72.0, dpi_eff/72.0)
+            pix = pg.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)  # pyright: ignore[reportAttributeAccessIssue]
+            jpg_b = pix.tobytes("jpeg", jpg_quality=jq)
+            del pix
+            try:
+                pdf1 = cast(bytes, img2pdf.convert(jpg_b))  # embrulha em PDF 1-pag
+                return len(pdf1)
+            except Exception:
+                # raro: se falhar o wrapper em PDF, usa JPEG como proxy (+1024 p/ aproximar)
+                return len(jpg_b) + 1024
+
+        if level == "min":
+            return min(base_len, _cand_len("min"))
+        elif level == "med":
+            return min(base_len, _cand_len("min"), _cand_len("med"))
+        elif level == "max":
+            return min(base_len, _cand_len("min"), _cand_len("med"), _cand_len("max"))
+        else:
+            return base_len
+    except Exception:
+        return len(pdf_bytes)
+    finally:
+        try:
+            src.close()
+        except Exception:
+            pass
 
 def _cap_dpi_for_page(page: "fitz.Page", target_dpi: int) -> int:
     """
@@ -165,125 +229,35 @@ def _cap_dpi_for_page(page: "fitz.Page", target_dpi: int) -> int:
 def estimate_pdf_size(pdf_bytes: bytes, level: str) -> int:
     """Estima o tamanho final de um PDF após aplicar um nível de compressão.
 
-    Args:
-        pdf_bytes (bytes): PDF de entrada.
-        level (str): 'none'|'min'|'med'|'max'.
+    ***Agora usa o MESMO guard-rail do merge_pages***:
+    para cada página, compara o PDF 1:1 com os candidatos rasterizados e soma o menor.
 
-    Returns:
-        int: Tamanho estimado em bytes do PDF resultante.
+    Nota: somamos um overhead pequeno para aproximar o write() final.
     """
-
-    params = LEVELS.get(level or "none", LEVELS["none"])
-    mode = params["mode"]
-    dpi = params["dpi"]
-    jpg_q = params["jpg_q"]
-
-    if mode == "none":
+    try:
+        src = fitz.open("pdf", pdf_bytes)
+        pages = src.page_count
+        src.close()
+    except Exception:
         return len(pdf_bytes)
 
-    # "all": renderiza todas as páginas -> JPEG -> converte p/ PDF
-    if mode == "all":
-        doc = fitz.open("pdf", pdf_bytes)
-        jpg_pages = []
-        for i in range(doc.page_count):
-            pg = doc.load_page(i)
-            pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-            jpg_pages.append(pix.tobytes("jpeg", jpg_quality=jpg_q))
-        doc.close()
-        try:
-            est_pdf = cast(bytes, img2pdf.convert(jpg_pages))
-        except Exception:
-            est_pdf = b"".join(jpg_pages) + b"\x00" * (1024 * len(jpg_pages))
-        return len(est_pdf)
+    # Overheads (ajuste fino opcional)
+    EST_OVERHEAD_DOC = 2048
+    EST_OVERHEAD_PER_PAGE = 512
 
-    # "smart": rasteriza só páginas imagem-only; copia as demais
-    if mode == "smart":
-        src = fitz.open("pdf", pdf_bytes)
-        dst = fitz.open()
+    total = 0
+    for i in range(pages):
+        total += _estimate_pdf_page_len_guardrail(pdf_bytes, i, level)
 
-        def _copy_page(dst_doc, src_doc, i: int):
-            dst_doc.insert_pdf(src_doc, from_page=i, to_page=i)
+    return max(0, total + EST_OVERHEAD_DOC + EST_OVERHEAD_PER_PAGE * pages)
 
-        def _rasterize_to(dst_doc, page_obj: "fitz.Page", dpi_val: int, jpeg_q: int):
-            pix = page_obj.get_pixmap(dpi=dpi_val, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-            img_bytes = pix.tobytes("jpeg", jpg_quality=jpeg_q)
-            rect = page_obj.rect
-            p = dst_doc.new_page(width=rect.width, height=rect.height)
-            p.insert_image(rect, stream=img_bytes)
-
-        for i in range(src.page_count):
-            page = src.load_page(i)
-            if _is_image_only(page):
-                _rasterize_to(dst, page, dpi, jpg_q)
-            else:
-                _copy_page(dst, src, i)
-
-
-        est_bytes = dst.write(garbage=4, deflate=True, clean=True)# pyright: ignore[reportArgumentType]
-        dst.close()
-        src.close()
-        return len(est_bytes)
-
-    return len(pdf_bytes)
 
 def estimate_pdf_page_size(pdf_bytes: bytes, page_idx: int, level: str) -> int:
     """Estima o tamanho de UMA página após aplicar um nível.
 
-    Args:
-        pdf_bytes (bytes): PDF de origem.
-        page_idx (int): Índice 0-based da página.
-        level (str): 'none'|'min'|'med'|'max'.
-
-    Returns:
-        int: Tamanho estimado em bytes para a página empacotada em PDF.
+    Agora usa o MESMO guard-rail do merge_pages (base vs candidatos).
     """
-
-    params = LEVELS.get(level or "none", LEVELS["none"])
-    mode = params["mode"]; dpi = params["dpi"]; jpg_q = params["jpg_q"]
-
-    doc = fitz.open("pdf", pdf_bytes)
-    if page_idx < 0 or page_idx >= doc.page_count:
-        doc.close()
-        return 0
-
-    pg = doc.load_page(page_idx)
-
-    if mode == "none":
-        tmp = fitz.open()
-        tmp.insert_pdf(doc, from_page=page_idx, to_page=page_idx)
-        est = len(tmp.write(garbage=4, deflate=True, clean=True))  # pyright: ignore[reportArgumentType]
-        tmp.close(); doc.close()
-        return est
-
-    if mode == "all":
-        pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-        jpg_b = pix.tobytes("jpeg", jpg_quality=jpg_q)
-        try:
-            est_pdf = cast(bytes, img2pdf.convert(jpg_b))
-        except Exception:
-            est_pdf = jpg_b + b"\x00" * 1024
-        doc.close()
-        return len(est_pdf)
-
-    if mode == "smart":
-        if _is_image_only(pg):
-            pix = pg.get_pixmap(dpi=dpi, alpha=False)  # pyright: ignore[reportAttributeAccessIssue]
-            jpg_b = pix.tobytes("jpeg", jpg_quality=jpg_q)
-            try:
-                est_pdf = cast(bytes, img2pdf.convert(jpg_b))
-            except Exception:
-                est_pdf = jpg_b + b"\x00" * 1024
-            doc.close()
-            return len(est_pdf)
-
-        tmp = fitz.open()
-        tmp.insert_pdf(doc, from_page=page_idx, to_page=page_idx)
-        est = len(tmp.write(garbage=4, deflate=True, clean=True))  # pyright: ignore[reportArgumentType]
-        tmp.close(); doc.close()
-        return est
-
-    doc.close()
-    return 0
+    return _estimate_pdf_page_len_guardrail(pdf_bytes, page_idx, level)
 
 
 def estimate_image_pdf_size(img_bytes: bytes, level: str) -> int:
